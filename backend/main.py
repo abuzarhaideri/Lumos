@@ -3,16 +3,20 @@ import os
 import uuid
 from pathlib import Path
 from contextlib import asynccontextmanager
+from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 
 from backend.db.client import (
     close_db,
+    create_user,
     create_session as db_create_session,
+    get_user_by_email,
+    get_user_by_id,
     get_session,
     init_db,
     mark_session_complete,
@@ -20,6 +24,12 @@ from backend.db.client import (
 )
 from backend.graph.graph import build_graph
 from backend.graph.state import TutorState
+from backend.services.auth import (
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+)
 from backend.services.gemini import gemini_generate_text
 from backend.services.parser import extract_text
 from backend.services.sse import sse_manager
@@ -62,6 +72,79 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+
+
+class SignupRequest(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: dict
+
+
+def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    parts = authorization.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    return parts[1].strip()
+
+
+async def _require_user(authorization: Optional[str]) -> dict:
+    token = _extract_bearer_token(authorization)
+    if not token:
+        raise HTTPException(401, "Missing bearer token")
+    payload = decode_access_token(token)
+    if not payload or "sub" not in payload:
+        raise HTTPException(401, "Invalid or expired token")
+    user = await get_user_by_id(str(payload["sub"]))
+    if not user:
+        raise HTTPException(401, "User not found")
+    return user
+
+
+@app.post("/api/auth/signup", response_model=AuthResponse)
+async def signup(request: SignupRequest):
+    if len(request.password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters.")
+
+    user = await create_user(
+        name=request.name.strip(),
+        email=str(request.email).lower(),
+        password_hash=hash_password(request.password),
+    )
+    if not user:
+        raise HTTPException(409, "Email already registered.")
+    token = create_access_token(user["id"], user["email"])
+    return AuthResponse(access_token=token, user=user)
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+async def login(request: LoginRequest):
+    user = await get_user_by_email(str(request.email).lower())
+    if not user or not verify_password(request.password, user["password_hash"]):
+        raise HTTPException(401, "Invalid email or password.")
+    token = create_access_token(user["id"], user["email"])
+    return AuthResponse(
+        access_token=token,
+        user={"id": user["id"], "name": user["name"], "email": user["email"]},
+    )
+
+
+@app.get("/api/auth/me")
+async def me(authorization: Optional[str] = Header(default=None)):
+    user = await _require_user(authorization)
+    return {"user": user}
 
 
 @app.post("/api/sessions")
@@ -125,7 +208,8 @@ async def get_result(session_id: str):
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, authorization: Optional[str] = Header(default=None)):
+    user = await _require_user(authorization)
     user_messages = [m for m in request.messages if m.role in {"user", "assistant"}]
     if not user_messages:
         raise HTTPException(400, "At least one user message is required.")
@@ -153,7 +237,8 @@ async def chat(request: ChatRequest):
             model="gemini-2.5-flash",
             system_text=(
                 "You are Lumos AI Tutor. Be concise, friendly, and pedagogically helpful. "
-                "Use simple language unless user asks for depth."
+                "Use simple language unless user asks for depth. "
+                f"The current user is {user['name']} ({user['email']})."
             ),
             user_text=prompt,
             max_output_tokens=512,

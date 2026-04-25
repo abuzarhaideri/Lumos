@@ -22,6 +22,8 @@ export default function HomePage() {
   const [darkMode, setDarkMode] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [backendHealthy, setBackendHealthy] = useState(true);
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
@@ -52,6 +54,31 @@ export default function HomePage() {
     }
     setDarkMode(window.matchMedia("(prefers-color-scheme: dark)").matches);
   }, []);
+
+  useEffect(() => {
+    const restoreAuth = async () => {
+      const savedToken = window.localStorage.getItem("lumos-token");
+      if (!savedToken) {
+        setAuthLoading(false);
+        return;
+      }
+      try {
+        const res = await fetch(`${backendBase}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${savedToken}` }
+        });
+        if (!res.ok) throw new Error("Expired session");
+        const data = (await res.json()) as { user: { name: string; email: string } };
+        setIsLoggedIn(true);
+        setUserName(data.user.name);
+        setToken(savedToken);
+      } catch {
+        window.localStorage.removeItem("lumos-token");
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    void restoreAuth();
+  }, [backendBase]);
 
   useEffect(() => {
     // After mount, replace placeholder timestamps with real client time.
@@ -104,6 +131,11 @@ export default function HomePage() {
     setInput("");
     setSending(true);
     setError("");
+    if (!isLoggedIn || !token) {
+      setSending(false);
+      setError("Please login first to chat with AI.");
+      return;
+    }
     const startedAt = performance.now();
     setChats((prev) =>
       prev.map((chat) =>
@@ -116,7 +148,10 @@ export default function HomePage() {
     try {
       const res = await fetch(`${backendBase}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify({ messages: updatedMessages })
       });
       if (!res.ok) throw new Error("AI reply failed.");
@@ -184,12 +219,39 @@ export default function HomePage() {
             isLoggedIn={isLoggedIn}
             userName={userName}
             onAuthModeToggle={() => setAuthMode((m) => (m === "login" ? "signup" : "login"))}
-            onSubmitAuth={(formData) => {
-              const name = String(formData.get("name") ?? "User").trim();
-              setUserName(name || "User");
-              setIsLoggedIn(true);
+            onSubmitAuth={async (formData) => {
+              setError("");
+              const payload = {
+                name: String(formData.get("name") ?? "").trim(),
+                email: String(formData.get("email") ?? "").trim(),
+                password: String(formData.get("password") ?? "")
+              };
+              try {
+                const endpoint = authMode === "login" ? "/api/auth/login" : "/api/auth/signup";
+                const res = await fetch(`${backendBase}${endpoint}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                  throw new Error(data?.detail || "Authentication failed");
+                }
+                setIsLoggedIn(true);
+                setUserName(data.user.name || payload.name || "User");
+                setToken(data.access_token);
+                window.localStorage.setItem("lumos-token", data.access_token);
+              } catch (err) {
+                setIsLoggedIn(false);
+                setToken("");
+                setError(err instanceof Error ? err.message : "Authentication failed");
+              }
             }}
-            onLogout={() => setIsLoggedIn(false)}
+            onLogout={() => {
+              setIsLoggedIn(false);
+              setToken("");
+              window.localStorage.removeItem("lumos-token");
+            }}
             darkMode={darkMode}
           />
 
@@ -288,6 +350,11 @@ export default function HomePage() {
             </div>
 
             <div className="px-4 pb-2">
+              {authLoading ? (
+                <p className="mx-auto max-w-3xl text-xs text-stone-500 dark:text-zinc-400">
+                  Restoring session...
+                </p>
+              ) : null}
               {error ? <p className="mx-auto max-w-3xl text-xs text-red-600">{error}</p> : null}
             </div>
 

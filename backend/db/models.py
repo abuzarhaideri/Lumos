@@ -1,4 +1,12 @@
 SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
     id UUID PRIMARY KEY,
     created_at TIMESTAMPTZ DEFAULT NOW(),

@@ -92,3 +92,48 @@ async def get_session(session_id: str) -> Optional[dict[str, Any]]:
         )
     return dict(row) if row else None
 
+
+async def create_user(name: str, email: str, password_hash: str) -> Optional[dict[str, Any]]:
+    assert _pool is not None, "Database pool not initialized."
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO users (name, email, password_hash)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (email) DO NOTHING
+            RETURNING id::text, name, email
+            """,
+            name.strip(),
+            email.strip().lower(),
+            password_hash,
+        )
+    return dict(row) if row else None
+
+
+async def get_user_by_email(email: str) -> Optional[dict[str, Any]]:
+    assert _pool is not None, "Database pool not initialized."
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id::text, name, email, password_hash
+            FROM users
+            WHERE email = $1
+            """,
+            email.strip().lower(),
+        )
+    return dict(row) if row else None
+
+
+async def get_user_by_id(user_id: str) -> Optional[dict[str, Any]]:
+    assert _pool is not None, "Database pool not initialized."
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id::text, name, email
+            FROM users
+            WHERE id = $1::uuid
+            """,
+            user_id,
+        )
+    return dict(row) if row else None
+

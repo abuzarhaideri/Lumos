@@ -8,3 +8,5 @@ pypdf==4.2.0
 python-dotenv==1.0.1
 pydantic==2.7.4
 google-genai==1.0.0
+bcrypt==5.0.0
+PyJWT==2.12.1

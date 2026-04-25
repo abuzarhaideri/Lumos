@@ -2,6 +2,8 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -40,7 +42,7 @@ export default function MessageList({ messages, typing, darkMode }: MessageListP
               }`}
             >
               <div
-                className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-7 shadow-sm ${
+                className={`max-w-[82%] rounded-2xl px-5 py-4 text-sm leading-relaxed shadow-sm ${
                   message.role === "assistant"
                     ? darkMode
                       ? "border border-zinc-700 bg-zinc-800 text-zinc-100"
@@ -48,10 +50,14 @@ export default function MessageList({ messages, typing, darkMode }: MessageListP
                     : "bg-gradient-to-br from-blue-600 to-indigo-600 text-white"
                 }`}
               >
-                <p className="whitespace-pre-wrap">{message.content}</p>
+                <div className="prose prose-sm max-w-none dark:prose-invert prose-p:leading-relaxed prose-pre:bg-zinc-900 prose-pre:text-zinc-100 prose-a:text-blue-500 hover:prose-a:text-blue-600">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {message.content}
+                  </ReactMarkdown>
+                </div>
                 {!grouped ? (
                   <p
-                    className={`mt-2 text-[11px] ${
+                    className={`mt-3 text-[11px] ${
                       message.role === "assistant"
                         ? darkMode
                           ? "text-zinc-400"

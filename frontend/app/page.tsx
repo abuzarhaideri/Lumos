@@ -11,6 +11,7 @@ interface ChatThread {
   title: string;
   createdAt: number;
   messages: ChatMessage[];
+  sessionId?: string;
 }
 
 export default function HomePage() {
@@ -25,6 +26,8 @@ export default function HomePage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
+  const [authFormError, setAuthFormError] = useState("");
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [backendHealthy, setBackendHealthy] = useState(true);
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
   // IMPORTANT: Keep initial state SSR-deterministic to avoid hydration mismatch.
@@ -152,7 +155,10 @@ export default function HomePage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ messages: updatedMessages })
+        body: JSON.stringify({ 
+          messages: updatedMessages,
+          session_id: activeChat.sessionId
+        })
       });
       if (!res.ok) throw new Error("AI reply failed.");
       const data = (await res.json()) as { reply: string };
@@ -198,6 +204,130 @@ export default function HomePage() {
     }
   };
 
+  const uploadFile = async (file: File) => {
+    if (!activeChat) return;
+
+    const userMessage: ChatMessage = { role: "user", content: `Uploaded file: ${file.name}`, createdAt: Date.now() };
+    const loadingMessage: ChatMessage = { role: "assistant", content: "**Started 5-Agent Pipeline:**\n\n", createdAt: Date.now() + 1 };
+    
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.id === activeChat.id
+          ? { ...chat, messages: [...chat.messages, userMessage, loadingMessage] }
+          : chat
+      )
+    );
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch(`${backendBase}/api/sessions`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "File upload failed.");
+      }
+      const data = await res.json();
+      const sessionId = data.session_id;
+
+      // Update the chat thread to link to this session
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.id === activeChat.id
+            ? { ...chat, sessionId }
+            : chat
+        )
+      );
+
+      const eventSource = new EventSource(`${backendBase}/api/sessions/${sessionId}/stream`);
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "log") {
+            setChats((prev) =>
+              prev.map((chat) => {
+                if (chat.id !== activeChat.id) return chat;
+                
+                const newMessages = [...chat.messages];
+                // Find the pipeline loading message specifically
+                const targetIndex = newMessages.findLastIndex(
+                  (m) => m.role === "assistant" && m.content.includes("**Started 5-Agent Pipeline:**")
+                );
+                
+                if (targetIndex !== -1) {
+                  newMessages[targetIndex] = {
+                    ...newMessages[targetIndex],
+                    content: newMessages[targetIndex].content + "• " + payload.message + "\n"
+                  };
+                }
+                return { ...chat, messages: newMessages };
+              })
+            );
+          } else if (payload.type === "done") {
+            eventSource.close();
+            
+            // Fetch the final curriculum result and display it!
+            fetch(`${backendBase}/api/sessions/${sessionId}/result`)
+              .then(r => r.json())
+              .then(data => {
+                if (data.status === "complete" && data.curriculum) {
+                  let curriculumText = "**🎉 Pipeline Complete! Here is your Curriculum:**\n\n";
+                  
+                  try {
+                    const parsed = JSON.parse(data.curriculum);
+                    if (parsed.length > 0) {
+                      parsed.forEach((lesson: any, i: number) => {
+                         curriculumText += `### Module ${i+1}: ${lesson.title || 'Lesson'}\n`;
+                         curriculumText += `${lesson.content || ''}\n\n`;
+                         if (lesson.quiz && lesson.quiz.length > 0) {
+                           curriculumText += `**Quiz:**\n`;
+                           lesson.quiz.forEach((q: any, qi: number) => {
+                             curriculumText += `${qi+1}. ${q.question}\n`;
+                           });
+                         }
+                         curriculumText += `\n---\n\n`;
+                      });
+                    } else {
+                      curriculumText += "No curriculum modules were generated.";
+                    }
+                  } catch(e) {
+                    curriculumText += "Error formatting curriculum.";
+                  }
+
+                  setChats((prev) =>
+                    prev.map((chat) => {
+                      if (chat.id !== activeChat.id) return chat;
+                      return {
+                        ...chat,
+                        messages: [
+                          ...chat.messages,
+                          { role: "assistant", content: curriculumText, createdAt: Date.now() }
+                        ]
+                      };
+                    })
+                  );
+                }
+              })
+              .catch(err => console.error("Failed to fetch result:", err));
+          }
+        } catch (e) {
+          console.error("SSE Parse Error:", e);
+        }
+      };
+
+      eventSource.onerror = () => {
+        eventSource.close();
+      };
+      
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload error");
+    }
+  };
+
   return (
     <main>
       <div
@@ -220,7 +350,8 @@ export default function HomePage() {
             userName={userName}
             onAuthModeToggle={() => setAuthMode((m) => (m === "login" ? "signup" : "login"))}
             onSubmitAuth={async (formData) => {
-              setError("");
+              setAuthFormError("");
+              setIsAuthSubmitting(true);
               const payload = {
                 name: String(formData.get("name") ?? "").trim(),
                 email: String(formData.get("email") ?? "").trim(),
@@ -244,7 +375,9 @@ export default function HomePage() {
               } catch (err) {
                 setIsLoggedIn(false);
                 setToken("");
-                setError(err instanceof Error ? err.message : "Authentication failed");
+                setAuthFormError(err instanceof Error ? err.message : "Authentication failed");
+              } finally {
+                setIsAuthSubmitting(false);
               }
             }}
             onLogout={() => {
@@ -253,6 +386,8 @@ export default function HomePage() {
               window.localStorage.removeItem("lumos-token");
             }}
             darkMode={darkMode}
+            authError={authFormError}
+            isAuthSubmitting={isAuthSubmitting}
           />
 
           <section
@@ -362,6 +497,7 @@ export default function HomePage() {
               value={input}
               onChange={setInput}
               onSend={sendMessage}
+              onFileUpload={uploadFile}
               sending={sending}
               darkMode={darkMode}
             />

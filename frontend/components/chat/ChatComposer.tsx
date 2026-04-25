@@ -1,9 +1,11 @@
 "use client";
+import * as React from "react";
 
 interface ChatComposerProps {
   value: string;
   onChange: (value: string) => void;
   onSend: () => void;
+  onFileUpload: (file: File) => void;
   sending: boolean;
   darkMode: boolean;
 }
@@ -12,9 +14,12 @@ export default function ChatComposer({
   value,
   onChange,
   onSend,
+  onFileUpload,
   sending,
   darkMode
 }: ChatComposerProps) {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
   return (
     <div
       className={`sticky bottom-0 border-t px-4 py-4 backdrop-blur sm:px-6 ${
@@ -27,7 +32,20 @@ export default function ChatComposer({
             darkMode ? "border-zinc-700 bg-zinc-800" : "border-stone-300 bg-white"
           }`}
         >
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            accept=".pdf,.txt,.md"
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0]) {
+                onFileUpload(e.target.files[0]);
+                e.target.value = ""; // reset
+              }
+            }}
+          />
           <button
+            onClick={() => fileInputRef.current?.click()}
             className={`rounded-xl p-2 transition ${
               darkMode
                 ? "text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"

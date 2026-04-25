@@ -22,6 +22,8 @@ interface SidebarProps {
   onSubmitAuth: (formData: FormData) => void;
   onLogout: () => void;
   darkMode: boolean;
+  authError?: string;
+  isAuthSubmitting?: boolean;
 }
 
 export default function Sidebar(props: SidebarProps) {
@@ -38,7 +40,9 @@ export default function Sidebar(props: SidebarProps) {
     onAuthModeToggle,
     onSubmitAuth,
     onLogout,
-    darkMode
+    darkMode,
+    authError,
+    isAuthSubmitting
   } = props;
 
   return (
@@ -98,12 +102,15 @@ export default function Sidebar(props: SidebarProps) {
                   }}
                 >
                   <p className={`text-xs font-medium ${darkMode ? "text-zinc-400" : "text-stone-600"}`}>{authMode.toUpperCase()}</p>
-                  <input name="name" placeholder="Name" className={`w-full rounded-xl border px-3 py-2 text-sm outline-none ring-blue-300/50 transition focus:ring-2 ${darkMode ? "border-zinc-700 bg-zinc-800 text-zinc-100" : "border-stone-300 bg-white text-stone-900"}`} required />
+                  {authMode === "signup" && (
+                    <input name="name" placeholder="Name" className={`w-full rounded-xl border px-3 py-2 text-sm outline-none ring-blue-300/50 transition focus:ring-2 ${darkMode ? "border-zinc-700 bg-zinc-800 text-zinc-100" : "border-stone-300 bg-white text-stone-900"}`} required />
+                  )}
                   <input name="email" type="email" placeholder="Email" className={`w-full rounded-xl border px-3 py-2 text-sm outline-none ring-blue-300/50 transition focus:ring-2 ${darkMode ? "border-zinc-700 bg-zinc-800 text-zinc-100" : "border-stone-300 bg-white text-stone-900"}`} required />
                   <input name="password" type="password" placeholder="Password" className={`w-full rounded-xl border px-3 py-2 text-sm outline-none ring-blue-300/50 transition focus:ring-2 ${darkMode ? "border-zinc-700 bg-zinc-800 text-zinc-100" : "border-stone-300 bg-white text-stone-900"}`} required />
-                  <button className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-3 py-2 text-sm text-white shadow-sm transition hover:brightness-110">
-                    {authMode === "login" ? "Log in" : "Sign up"}
+                  <button disabled={isAuthSubmitting} className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-3 py-2 text-sm text-white shadow-sm transition hover:brightness-110 disabled:opacity-50">
+                    {isAuthSubmitting ? "..." : (authMode === "login" ? "Log in" : "Sign up")}
                   </button>
+                  {authError && <p className="text-xs text-red-500">{authError}</p>}
                   <button type="button" onClick={onAuthModeToggle} className={`text-xs underline ${darkMode ? "text-zinc-400" : "text-stone-600"}`}>
                     {authMode === "login" ? "Need account? Sign up" : "Already have account? Log in"}
                   </button>

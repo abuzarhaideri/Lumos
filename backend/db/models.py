@@ -1,51 +1,27 @@
+"""
+SQLite-compatible schema.
+
+Uses INTEGER PRIMARY KEY AUTOINCREMENT for users (SQLite-native),
+TEXT for everything else. UUIDs are stored as TEXT.
+"""
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    email      TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
-    id UUID PRIMARY KEY,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
+    id              TEXT PRIMARY KEY,
+    created_at      TEXT DEFAULT (datetime('now')),
     source_doc_name TEXT,
     source_doc_text TEXT,
-    status TEXT DEFAULT 'pending',
-    iteration_count INT DEFAULT 0,
-    result_json JSONB,
-    error_message TEXT
+    status          TEXT DEFAULT 'pending',
+    iteration_count INTEGER DEFAULT 0,
+    result_json     TEXT,
+    error_message   TEXT
 );
-
-CREATE TABLE IF NOT EXISTS curricula (
-    id UUID PRIMARY KEY,
-    session_id UUID REFERENCES sessions(id),
-    lesson_plan JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS lessons (
-    id UUID PRIMARY KEY,
-    curriculum_id UUID REFERENCES curricula(id),
-    sequence_order INT,
-    title TEXT,
-    content JSONB,
-    quiz JSONB,
-    status TEXT DEFAULT 'draft',
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS student_attempts (
-    id UUID PRIMARY KEY,
-    lesson_id UUID REFERENCES lessons(id),
-    attempt_number INT,
-    score FLOAT,
-    confusion_log JSONB,
-    passed BOOLEAN,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS result_json JSONB;
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS error_message TEXT;
 """

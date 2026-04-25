@@ -30,10 +30,9 @@ from backend.services.auth import (
     hash_password,
     verify_password,
 )
-from backend.services.gemini import gemini_generate_text
+from backend.services.openrouter import MODEL_ARCHITECT, generate_text
 from backend.services.parser import extract_text
 from backend.services.sse import sse_manager
-from google.genai import errors as gemini_errors
 
 # Explicitly load backend/.env regardless of current working directory.
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
@@ -68,6 +67,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
+    session_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -160,15 +160,25 @@ async def create_session(file: UploadFile = File(...)):
     initial_state: TutorState = {
         "session_id": session_id,
         "raw_document": raw_text,
+        # Agent 1a output
+        "chunks": None,
+        "document_title": None,
+        # Agent 1b — pass None here; profiler_node will use the default diagnostic
+        # To supply a real diagnostic from the frontend, post it as a form field.
+        "learner_profile": None,
+        # Agent 2 output
         "lesson_plan": None,
+        # Per-lesson loop
         "current_lesson_index": 0,
         "current_lesson_content": None,
         "confusion_log": None,
+        "validation_result": None,
         "iteration_count": 0,
         "max_iterations": 3,
         "passed": False,
+        # Output
         "agent_log": [],
-        "final_curriculum": None,
+        "final_curriculum": [],
     }
     await db_create_session(session_id, filename, raw_text)
 
@@ -214,41 +224,63 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(defau
     if not user_messages:
         raise HTTPException(400, "At least one user message is required.")
 
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         last_user = next((m.content for m in reversed(user_messages) if m.role == "user"), "")
         return ChatResponse(
             reply=(
-                f"Hi! I received: '{last_user}'. "
-                "Add GEMINI_API_KEY in backend env for real AI replies."
+                f"Hi {user['name']}! I received: '{last_user}'. "
+                "Add OPENROUTER_API_KEY in backend/.env for real AI replies."
             )
         )
 
-    # Gemini expects "model" for assistant role in explicit content arrays, but for simplicity
-    # we turn chat history into a single text prompt.
+    # Build a flat conversation prompt
     conversation = []
     for m in user_messages:
         prefix = "User" if m.role == "user" else "Assistant"
         conversation.append(f"{prefix}: {m.content}")
     prompt = "\n".join(conversation) + "\nAssistant:"
 
+    # If the user is chatting in a thread with an active document, inject it!
+    context_text = ""
+    if request.session_id:
+        session = await get_session(request.session_id)
+        if session and session.get("source_doc_text"):
+            doc_text = session["source_doc_text"]
+            # Limit the injected text to ~15,000 chars to avoid blowing up the context window
+            # but provide enough for good Q&A
+            if len(doc_text) > 15000:
+                doc_text = doc_text[:15000] + "\n...[Document truncated]..."
+            
+            context_text = (
+                f"\n\n--- UPLOADED DOCUMENT CONTENT ---\n"
+                f"{doc_text}\n"
+                f"-----------------------------------\n\n"
+                f"CRITICAL INSTRUCTION: The user has uploaded the above document. "
+                f"The text of the document has already been extracted and provided to you above. "
+                f"DO NOT say that you cannot read PDFs, cannot access files, or cannot open attachments. "
+                f"You have the text right here. You MUST use the provided content to answer any questions "
+                f"they have about 'the file', 'the document', or 'this pdf'. Be extremely helpful and direct."
+            )
+
     try:
-        reply = gemini_generate_text(
-            model="gemini-2.5-flash",
+        reply = generate_text(
+            model=MODEL_ARCHITECT,  # capable chat model
             system_text=(
                 "You are Lumos AI Tutor. Be concise, friendly, and pedagogically helpful. "
-                "Use simple language unless user asks for depth. "
+                "Use simple language unless the user asks for depth. "
                 f"The current user is {user['name']} ({user['email']})."
+                f"{context_text}"
             ),
             user_text=prompt,
-            max_output_tokens=512,
+            max_tokens=512,
             temperature=0.5,
         )
         return ChatResponse(reply=reply)
-    except gemini_errors.ClientError as exc:
+    except Exception as exc:
         return ChatResponse(
             reply=(
-                "Gemini API request failed. Check if your API key is valid/active "
-                f"and not restricted. Error: {exc}"
+                "OpenRouter API request failed. Check that OPENROUTER_API_KEY is valid. "
+                f"Error: {exc}"
             )
         )

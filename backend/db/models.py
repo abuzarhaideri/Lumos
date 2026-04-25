@@ -5,7 +5,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     source_doc_name TEXT,
     source_doc_text TEXT,
     status TEXT DEFAULT 'pending',
-    iteration_count INT DEFAULT 0
+    iteration_count INT DEFAULT 0,
+    result_json JSONB,
+    error_message TEXT
 );
 
 CREATE TABLE IF NOT EXISTS curricula (
@@ -35,4 +37,7 @@ CREATE TABLE IF NOT EXISTS student_attempts (
     passed BOOLEAN,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS result_json JSONB;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS error_message TEXT;
 """

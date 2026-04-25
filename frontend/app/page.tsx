@@ -23,6 +23,8 @@ export default function HomePage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [backendHealthy, setBackendHealthy] = useState(true);
+  const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
   // IMPORTANT: Keep initial state SSR-deterministic to avoid hydration mismatch.
   const [chats, setChats] = useState<ChatThread[]>(() => [
     {
@@ -87,6 +89,10 @@ export default function HomePage() {
     setActiveChatId(id);
   };
 
+  const sendPresetPrompt = (prompt: string) => {
+    setInput(prompt);
+  };
+
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || !activeChat) return;
@@ -98,6 +104,7 @@ export default function HomePage() {
     setInput("");
     setSending(true);
     setError("");
+    const startedAt = performance.now();
     setChats((prev) =>
       prev.map((chat) =>
         chat.id === activeChat.id
@@ -114,6 +121,8 @@ export default function HomePage() {
       });
       if (!res.ok) throw new Error("AI reply failed.");
       const data = (await res.json()) as { reply: string };
+      setBackendHealthy(true);
+      setLastLatencyMs(Math.round(performance.now() - startedAt));
 
       setChats((prev) =>
         prev.map((chat) =>
@@ -130,6 +139,8 @@ export default function HomePage() {
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
+      setBackendHealthy(false);
+      setLastLatencyMs(Math.round(performance.now() - startedAt));
       setChats((prev) =>
         prev.map((chat) =>
           chat.id === activeChat.id
@@ -183,18 +194,96 @@ export default function HomePage() {
           />
 
           <section
-            className={`flex h-full min-w-0 flex-col rounded-2xl border shadow-[0_16px_48px_rgba(16,18,40,0.08)] backdrop-blur ${
+            className={`flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border shadow-[0_16px_48px_rgba(16,18,40,0.08)] backdrop-blur ${
               darkMode ? "border-zinc-800 bg-zinc-900/70" : "border-stone-300/80 bg-white/70"
             }`}
           >
+            <div
+              className={`grid grid-cols-2 gap-2 border-b px-4 py-3 text-xs sm:grid-cols-5 ${
+                darkMode ? "border-zinc-800 bg-zinc-900/70" : "border-stone-200 bg-stone-50/80"
+              }`}
+            >
+              {[
+                "Clear user + pain",
+                "10-second clarity",
+                "Zero instruction use",
+                "Technical execution",
+                "Demo quality"
+              ].map((item) => (
+                <div
+                  key={item}
+                  className={`rounded-lg border px-2 py-1 text-center ${
+                    darkMode
+                      ? "border-zinc-700 bg-zinc-800/70 text-zinc-200"
+                      : "border-stone-200 bg-white text-stone-700"
+                  }`}
+                >
+                  {item}
+                </div>
+              ))}
+            </div>
+
             <ChatHeader
               modelName="Lumos Tutor • Claude Sonnet"
-              online={true}
+              online={backendHealthy}
               darkMode={darkMode}
               onToggleTheme={() => setDarkMode((v) => !v)}
             />
 
-            <div className="min-h-0 flex-1 overflow-y-auto scroll-smooth">
+            <div
+              className={`border-b px-5 py-3 ${
+                darkMode ? "border-zinc-800 bg-zinc-900/40" : "border-stone-200 bg-white/80"
+              }`}
+            >
+              <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
+                <p className={`text-xs ${darkMode ? "text-zinc-300" : "text-stone-600"}`}>
+                  Lumos turns dry technical docs into structured lessons and quizzes with AI feedback loops.
+                </p>
+                <span
+                  className={`ml-auto rounded-md px-2 py-1 text-[11px] ${
+                    backendHealthy
+                      ? darkMode
+                        ? "bg-emerald-900/40 text-emerald-300"
+                        : "bg-emerald-100 text-emerald-700"
+                      : darkMode
+                        ? "bg-red-900/40 text-red-300"
+                        : "bg-red-100 text-red-700"
+                  }`}
+                >
+                  {backendHealthy ? "API Healthy" : "API Error"}
+                </span>
+                {lastLatencyMs !== null ? (
+                  <span
+                    className={`rounded-md px-2 py-1 text-[11px] ${
+                      darkMode ? "bg-zinc-800 text-zinc-300" : "bg-stone-100 text-stone-700"
+                    }`}
+                  >
+                    {lastLatencyMs} ms
+                  </span>
+                ) : null}
+              </div>
+              <div className="mx-auto mt-2 flex max-w-3xl flex-wrap gap-2">
+                {[
+                  "Explain transformers for a 10th class student",
+                  "Generate a 3-lesson plan from this topic: FastAPI",
+                  "Quiz me on Python async with 5 MCQs"
+                ].map((prompt) => (
+                  <button
+                    key={prompt}
+                    onClick={() => sendPresetPrompt(prompt)}
+                    className={`rounded-full border px-3 py-1 text-xs transition ${
+                      darkMode
+                        ? "border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+                        : "border-stone-300 bg-white text-stone-700 hover:bg-stone-100"
+                    }`}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="h-0 min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth">
               <MessageList messages={activeChat?.messages ?? []} typing={sending} darkMode={darkMode} />
             </div>
 
